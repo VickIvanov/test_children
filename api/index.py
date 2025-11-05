@@ -151,7 +151,22 @@ class handler(BaseHTTPRequestHandler):
     
     def _serve_currency_page(self):
         """Страница с курсами валют"""
-        # Используем упрощенную версию страницы, которая загружает данные через API
+        # Читаем полный шаблон из app.py
+        try:
+            app_path = os.path.join(os.path.dirname(__file__), '..', 'app.py')
+            with open(app_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                # Извлекаем CURRENCY_HTML_TEMPLATE
+                import re
+                match = re.search(r'CURRENCY_HTML_TEMPLATE = """(.*?)"""', content, re.DOTALL)
+                if match:
+                    html = match.group(1)
+                    self._send_html(html)
+                    return
+        except Exception as e:
+            print(f"Error loading template: {e}")
+        
+        # Fallback - используем упрощенную версию
         html = """<!DOCTYPE html>
 <html lang="ru">
 <head>
