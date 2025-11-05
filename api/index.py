@@ -151,24 +151,156 @@ class handler(BaseHTTPRequestHandler):
     
     def _serve_currency_page(self):
         """Страница с курсами валют"""
-        # Читаем шаблон из файла app.py или используем встроенный
-        try:
-            app_path = os.path.join(os.path.dirname(__file__), '..', 'app.py')
-            with open(app_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-                start = content.find('CURRENCY_HTML_TEMPLATE = """')
-                if start != -1:
-                    start += len('CURRENCY_HTML_TEMPLATE = """')
-                    end = content.find('"""', start)
-                    if end != -1:
-                        html = content[start:end]
-                        self._send_html(html)
-                        return
-        except:
-            pass
+        # Используем упрощенную версию страницы, которая загружает данные через API
+        html = """<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Курсы валют</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background-size: cover; background-position: center; background-attachment: fixed;
+            min-height: 100vh; padding: 20px; transition: background-image 0.5s ease;
+        }
+        .container { background: white; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); padding: 40px; max-width: 1400px; margin: 0 auto; }
+        h1 { color: #667eea; font-size: 2.5em; text-align: center; margin-bottom: 30px; font-weight: 700; }
+        .nav-links { text-align: center; margin-bottom: 30px; }
+        .nav-links a { color: #667eea; text-decoration: none; margin: 0 15px; font-weight: 500; }
+        .controls { display: flex; gap: 15px; margin-bottom: 30px; flex-wrap: wrap; align-items: center; }
+        .control-group { display: flex; flex-direction: column; gap: 5px; }
+        .control-group label { font-size: 0.9em; color: #666; font-weight: 500; }
+        select, input[type="date"], button { padding: 10px 15px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 1em; font-family: inherit; }
+        button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; cursor: pointer; font-weight: 600; }
+        .custom-period { display: none; gap: 10px; }
+        .custom-period.active { display: flex; }
+        .chart-container { margin-top: 30px; background: #f8f9fa; border-radius: 10px; padding: 20px; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 20px; }
+        .stat-card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .error { background: #fee; color: #c33; padding: 15px; border-radius: 8px; margin-top: 20px; }
+        .loading { text-align: center; padding: 40px; color: #666; font-size: 1.1em; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>💱 Курсы валют к рублю</h1>
+        <div class="nav-links">
+            <a href="/">🏠 Главная</a>
+            <a href="/currency">💱 Курсы валют</a>
+        </div>
+        <div class="controls">
+            <div class="control-group">
+                <label>Тип валюты</label>
+                <select id="currencyType"><option value="fiat">Фиатные валюты</option><option value="crypto">Криптовалюты</option></select>
+            </div>
+            <div class="control-group">
+                <label>Валюта</label>
+                <select id="currencySelect"></select>
+            </div>
+            <div class="control-group">
+                <label>Период</label>
+                <select id="periodSelect">
+                    <option value="7d">7 дней</option>
+                    <option value="30d">30 дней</option>
+                    <option value="90d">90 дней</option>
+                    <option value="1y">1 год</option>
+                    <option value="custom">Кастомный период</option>
+                </select>
+            </div>
+            <div class="custom-period" id="customPeriod">
+                <div class="control-group"><label>Начальная дата</label><input type="date" id="startDate"></div>
+                <div class="control-group"><label>Конечная дата</label><input type="date" id="endDate"></div>
+            </div>
+            <div class="control-group">
+                <label>&nbsp;</label>
+                <button onclick="loadChart()">Показать график</button>
+            </div>
+        </div>
+        <div id="chartContainer" class="chart-container">
+            <div class="loading">Выберите валюту и период для отображения графика</div>
+        </div>
+    </div>
+    <script>
+        const fiatCurrencies = ['USD', 'EUR', 'GBP', 'JPY', 'CNY', 'CHF', 'AUD', 'CAD', 'NOK', 'SEK'];
+        const cryptoCurrencies = ['BTC', 'ETH', 'BNB', 'XRP', 'ADA', 'SOL', 'DOGE', 'DOT', 'MATIC', 'LTC'];
         
-        # Fallback - простая страница
-        self._send_html("<html><body><h1>Currency Page</h1><p>Loading...</p></body></html>")
+        function updateCurrencySelect(type) {
+            const select = document.getElementById('currencySelect');
+            select.innerHTML = '';
+            const currencies = type === 'fiat' ? fiatCurrencies : cryptoCurrencies;
+            currencies.forEach(code => {
+                const option = document.createElement('option');
+                option.value = code;
+                option.textContent = code;
+                select.appendChild(option);
+            });
+        }
+        
+        async function loadChart() {
+            const currency = document.getElementById('currencySelect').value;
+            const period = document.getElementById('periodSelect').value;
+            const container = document.getElementById('chartContainer');
+            if (!currency) {
+                container.innerHTML = '<div class="error">Пожалуйста, выберите валюту</div>';
+                return;
+            }
+            container.innerHTML = '<div class="loading">Загрузка данных...</div>';
+            let url = `/api/currency/history?currency=${encodeURIComponent(currency)}&period=${encodeURIComponent(period)}`;
+            if (period === 'custom') {
+                const startDate = document.getElementById('startDate').value;
+                const endDate = document.getElementById('endDate').value;
+                if (!startDate || !endDate) {
+                    container.innerHTML = '<div class="error">Пожалуйста, выберите начальную и конечную даты</div>';
+                    return;
+                }
+                url += `&start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`;
+            }
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                if (data.success) {
+                    const graphData = JSON.parse(data.graph);
+                    const statsHtml = `<div class="stats">
+                        <div class="stat-card"><div class="stat-label">Текущий курс</div><div class="stat-value">${data.data.current.toLocaleString('ru-RU', {minimumFractionDigits: 2})} ₽</div></div>
+                        <div class="stat-card"><div class="stat-label">Минимальный</div><div class="stat-value">${data.data.min.toLocaleString('ru-RU', {minimumFractionDigits: 2})} ₽</div></div>
+                        <div class="stat-card"><div class="stat-label">Максимальный</div><div class="stat-value">${data.data.max.toLocaleString('ru-RU', {minimumFractionDigits: 2})} ₽</div></div>
+                    </div>`;
+                    container.innerHTML = '<div id="chart"></div>' + statsHtml;
+                    Plotly.newPlot('chart', graphData.data, graphData.layout, {responsive: true});
+                } else {
+                    container.innerHTML = `<div class="error">Ошибка: ${data.error || 'Не удалось загрузить данные'}</div>`;
+                }
+            } catch (error) {
+                container.innerHTML = `<div class="error">Ошибка подключения: ${error.message}</div>`;
+            }
+        }
+        
+        document.getElementById('currencyType').addEventListener('change', () => {
+            updateCurrencySelect(document.getElementById('currencyType').value);
+        });
+        document.getElementById('periodSelect').addEventListener('change', function() {
+            const customPeriod = document.getElementById('customPeriod');
+            if (this.value === 'custom') {
+                customPeriod.classList.add('active');
+            } else {
+                customPeriod.classList.remove('active');
+            }
+        });
+        
+        updateCurrencySelect('fiat');
+        const today = new Date();
+        const weekAgo = new Date(today);
+        weekAgo.setDate(today.getDate() - 7);
+        document.getElementById('endDate').value = today.toISOString().split('T')[0];
+        document.getElementById('startDate').value = weekAgo.toISOString().split('T')[0];
+    </script>
+</body>
+</html>"""
+        self._send_html(html)
     
     def _serve_backgrounds_list(self):
         """API: список фонов"""
